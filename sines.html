@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Fourier Transform Image Processing Demo</title>
+<link rel="stylesheet" href="styles.css">
+<!-- Include an emscripten-compiled FFT library -->
+<script src="https://cdn.jsdelivr.net/gh/frederikhermans/js-kiss-fft2/compiled/a.out.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/frederikhermans/js-kiss-fft2/kissfft.js"></script>
+<script src="ft.js"></script>
+<script>
+"use strict";
+
+let current_wave_context, result_context, fft_context, fft_single_wave_context;
+let current_wave, waves = [], ignore_preview = true, current_fft;
+
+window.addEventListener('load', () => {
+	current_wave_context = setup_canvas('current-wave');
+	result_context = setup_canvas('result');
+	fft_context = setup_canvas('fft');
+	fft_single_wave_context = setup_canvas('fft-single-wave')
+	$('frequency').step = 1/Math.max(WIDTH, HEIGHT);
+	update_current_wave();
+	update_result();
+});
+
+/**
+ * Updates the display of the current wave using the sliders.
+ * If preview is enabled then the result is updated as well.
+ */
+function update_current_wave() {
+	ignore_preview = false;
+	current_wave = sine2d(
+		$('amplitude').valueAsNumber, $('frequency').valueAsNumber,
+		$('angle').valueAsNumber, $('phase').valueAsNumber,
+		$('offset').valueAsNumber);
+	set_canvas_data(current_wave_context, current_wave);
+	if ($('preview').checked) { update_result(); }
+}
+
+/**
+ * Adds the current wave to the results and updates the results.
+ * This causes the preview to be ignored until the current wave is changed.
+ */
+function add_current_wave() {
+	waves.push(current_wave);
+	ignore_preview = true;
+    if (!$('preview').checked) { update_result(); }
+}
+
+/**
+ * Updates the result view by averaging all of the waves together along with
+ * the current wave is preview button is checked and we are not ignoring it.
+ */
+function update_result() {
+	let use_preview = $('preview').checked && !ignore_preview;
+	let im;
+    [im, current_fft] = average_waves_and_fft(use_preview ? waves.concat([current_wave]) : waves);
+    set_canvas_data(result_context, im);
+    let dc = Math.hypot(current_fft[0], current_fft[1]);
+	$('dc').innerText = Math.round(dc) + " (avg " + (dc*100/(255*WIDTH*HEIGHT)).toFixed(1) + "% gray)";
+    update_result_display();
+}
+
+/**
+ * Updates the result view based on pre-computed data.
+ */
+ function update_result_display() {
+	let [fft_im, min, max] = fft_to_image(current_fft, $('color').checked, $('log').checked);
+	set_canvas_data(fft_context, fft_im);
+}
+
+/**
+ * Display a bunch of information about the current point under the mouse on
+ * the FFT including a representation of the wave.
+ */
+function fft_info(event) {
+	let rect = event.target.getBoundingClientRect();
+	let x = Math.trunc((event.clientX - rect.left)/SCALE) - WIDTH / 2;
+	let y = Math.trunc((event.clientY - rect.top)/SCALE) - HEIGHT / 2;
+    let [freq, angle, value, phase, im] = get_fft_info(current_fft, x, y);
+	$('out-frequency').innerText = freq.toFixed(2) + "/px";
+	$('out-angle').innerText = (angle*180/Math.PI).toFixed(2) + "°";
+	$('out-amplitude').innerText = "~" + value.toFixed(2);
+	$('out-phase').innerText = (phase*180/Math.PI).toFixed(2) + "°";
+	set_canvas_data(fft_single_wave_context, im);
+}
+</script>
+</head>
+<body>
+    <table>
+        <tr><td>
+            <h1>Create a 2D Sine Wave</h1>
+            <canvas id='current-wave'></canvas><br>
+            <table>
+                <tr><td>Amplitude:</td><td><input id='amplitude' type='range' min=0 max=255 value=128 step=1 oninput='update_current_wave();'></td></tr>
+                <tr><td>Offset:</td><td><input id='offset' type='range' min=0 max=255 step=0.5 value=127.5 oninput='update_current_wave();'></td></tr>
+                <tr><td>Frequency:</td><td><input id='frequency' type='range' min=0 max=0.5 value=0.1 step=0.00390625 oninput='update_current_wave();'></td></tr>
+                <tr><td>Angle:</td><td><input id='angle' type='range' min=-3.14 max=3.14 step=0.01 value=0 oninput='update_current_wave();'></td></tr>
+                <tr><td>Phase:</td><td><input id='phase' type='range' min=-3.14 max=3.14 step=0.01 value=0 oninput='update_current_wave();'></td></tr>
+            </table>
+            <label for='preview'><input id='preview' type='checkbox' checked onclick='update_result();'> Preview</label>
+            <input value='Add Wave' type='button' onclick='add_current_wave();'><br>
+        </td><td>
+            <h1>All Added Sines</h1>
+            <canvas id='result'></canvas><br>
+        </td><td>
+            <h1>FFT of Result</h1>
+            <canvas id='fft' onmousemove='fft_info(event);'></canvas><br>
+            DC: <span id='dc'></span><br>
+            Display:
+            <label for='log'><input id='log' type='checkbox' onclick='update_result_display();'> Log</label>
+            <span class='info'><span>When checked, the image shows the natural log of the magnitude of the complex value plus 1 which can greatly help see all of the detail. Otherwise, no natural log or plus 1. The DC component is always clipped to the second-max.</span></span>
+            <label for='color'><input id='color' type='checkbox' onclick='update_result_display();'> Color</label>
+            <span class='info'><span>The color is derived from the phase as follows (with positive real to the right and positive imaginary on the top):<br><img src="colors.png"></span></span><br><br>
+            <div style='text-align: center;'>You are hovering over:</div>
+            <table class=numerical>
+            <tr><td>Frequency:</td><td><span id='out-frequency'></span></td></tr>
+            <tr><td>Angle:</td><td><span id='out-angle'></span></td></tr>
+            </table>
+            <div style='text-align: center;'>And it has a value of:</div>
+            <table class=numerical>
+            <tr><td>Amplitude:</td><td><span id='out-amplitude'></span></td></tr>
+            <tr><td>Phase:</td><td><span id='out-phase'></span></td></tr>
+            </table>
+            <div style='text-align: center;'>It (approximately) looks like:</div>
+            <canvas id='fft-single-wave'></canvas>
+    </td></tr>
+    </table>
+</body>
+</html>

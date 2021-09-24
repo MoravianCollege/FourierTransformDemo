@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Fourier Transform Image Processing Demo</title>
+<link rel="stylesheet" href="styles.css">
+<!-- Include an emscripten-compiled FFT library -->
+<script src="https://cdn.jsdelivr.net/gh/frederikhermans/js-kiss-fft2/compiled/a.out.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/frederikhermans/js-kiss-fft2/kissfft.js"></script>
+<script src="ft.js"></script>
+<script>
+"use strict";
+
+let fft_context, fft_single_wave_context, recon_context, recon_fft_context;
+let current_fft, fft_indices, partial_fft = null, recon;
+
+window.addEventListener('load', () => {
+	fft_context = setup_canvas('fft');
+	fft_single_wave_context = setup_canvas('fft-single-wave');
+    recon_context = setup_canvas('reconstruction');
+    recon_fft_context = setup_canvas('reconstruction-fft');
+    $('n-largest').max = (WIDTH / 2 + 1) * HEIGHT;
+
+    // Setup drag-n-drop
+    let drop_target = $('drop-target');
+    drop_target.addEventListener('dragenter', event => {
+        event.preventDefault();
+        drop_target.classList.add('active');
+    });
+    drop_target.addEventListener('dragleave', event => {
+        event.preventDefault();
+        drop_target.classList.remove('active');
+    });
+    drop_target.addEventListener('dragover', event => {
+        event.preventDefault();
+    });
+    drop_target.addEventListener('drop', event => {
+        event.preventDefault();
+        drop_target.classList.remove('active');
+        set_image_from_file(event.dataTransfer.files[0]);
+    });
+
+    // Initial updating of the image and FFT
+    let select = $('image-select');
+    if (select.selectedIndex === select.length-1) {
+        select.selectedIndex = 0;
+    }
+	update_image();
+});
+
+/**
+ * Updates the image view given the displayed image.
+ */
+function update_image() {
+    let select = $('image-select'), last = select.length-1;
+    if (select.selectedIndex === last) {
+        // custom image
+        let input = document.createElement("input");
+        input.type = "file";
+        input.addEventListener('change', () => {
+            set_image_from_file(input.files[0]);
+        });
+        input.click();
+    } else {
+        // predefined image
+        $('image').src = select.value + '.png'
+        select.options[last].innerText = "custom...";
+    }
+}
+
+/**
+ * Set the current image to a custom image, either from a file dialog or from
+ * a drag-and-drop.
+ */
+function set_image_from_file(file) {
+    let select = $('image-select'), last = select.length-1;
+    if (file) {
+        // successfully got a file to display as custom
+        select.selectedIndex = last;
+        let reader = new FileReader();
+        reader.readAsDataURL(file);
+        reader.addEventListener('load', () => {
+            select.options[last].innerText = "custom: " + file.name;
+            $('image').src = reader.result;
+        });
+    } else if (select.selectedIndex == last) {
+        // fallback to first option
+        select.selectedIndex = 0;
+        select.options[last].innerText = "custom...";
+    }
+}
+
+/**
+ * Updates the FFT view given the displayed image.
+ */
+function update_fft() {
+    let im = to_grayscale(get_image_bytes($('image')));
+    current_fft = compute_fft(im);
+    fft_indices = compute_sorted_fft_indices(current_fft);
+    let dc = Math.hypot(current_fft[0], current_fft[1]);
+	$('dc').innerText = Math.round(dc) + " (avg " + (dc*100/(255*WIDTH*HEIGHT)).toFixed(1) + "% gray)";
+    update_fft_display();
+    update_recon();
+}
+
+/**
+ * Updates the FFT view based on pre-computed data.
+ */
+function update_fft_display() {
+	let [fft_im, min, max] = fft_to_image(current_fft, $('color').checked, $('log').checked);
+	set_canvas_data(fft_context, fft_im);
+    if (partial_fft !== null) { update_recon_fft_display(); }
+}
+
+/**
+ * Compute the reconstruction of the image uses a limited number of components
+ * from the FFT. 
+ */
+function update_recon() {
+    let count = Math.min($('n-largest').valueAsNumber || 0, fft_indices.length);
+    $('perc-largest').innerText = (count*100/fft_indices.length).toFixed(2);
+    // Extract the partial FFT
+    partial_fft = extract_fft(current_fft, fft_indices, count);
+    // Perform inverse FFT
+    recon = irfft2d(partial_fft, HEIGHT, WIDTH);
+    // Update displays
+    set_canvas_data(recon_context, from_grayscale(recon));
+    update_recon_fft_display();
+}
+
+/**
+ * Updates the FFT-reconstruction view based on pre-computed data.
+ */
+function update_recon_fft_display() {
+	let [fft_im, min, max] = fft_to_image(partial_fft, $('color').checked, $('log').checked);
+	set_canvas_data(recon_fft_context, fft_im);
+}
+
+/**
+ * Display a bunch of information about the current point under the mouse on
+ * the FFT including a representation of the wave.
+ */
+function fft_info(event) {
+	let rect = event.target.getBoundingClientRect();
+	let x = Math.trunc((event.clientX - rect.left)/SCALE) - WIDTH / 2;
+	let y = Math.trunc((event.clientY - rect.top)/SCALE) - HEIGHT / 2;
+    let [freq, angle, value, phase, im] = get_fft_info(current_fft, x, y);
+	$('out-frequency').innerText = freq.toFixed(2) + "/px";
+	$('out-angle').innerText = (angle*180/Math.PI).toFixed(2) + "°";
+	$('out-amplitude').innerText = "~" + value.toFixed(2);
+	$('out-phase').innerText = (phase*180/Math.PI).toFixed(2) + "°";
+	set_canvas_data(fft_single_wave_context, im);
+}
+
+</script>
+</head>
+<body>
+    <table>
+        <tr><td id="drop-target">
+            <h1>Image</h1>
+            <img id='image' onload='update_fft();'><br>
+            <select id='image-select' oninput="update_image();">
+                <option>solid-black</option><option>solid-gray</option><option>solid-white</option>
+                <option>edge-vertical</option><option>edge-horizontal</option><option>edge-diagonal</option>
+                <option>line-vertical</option><option>line-horizontal</option><option>line-diagonal</option>
+                <option>square</option><option>square-inverted</option><option>square-rotated</option>
+                <option>circle</option><option>circle-small</option><option>circle-tiny</option><option>circle-large</option><option>circle-non-aa</option>
+                <option>gaussian</option><option>gaussian-small</option><option>gaussian-large</option>
+                <option>random-dots-1</option><option>random-dots-a</option>
+                <option>custom...</option>
+            </select>
+        </td><td>
+            <h1>FFT</h1>
+            <canvas id='fft' onmousemove='fft_info(event);'></canvas><br>
+            DC: <span id='dc'></span><br>
+            Display:
+            <label for='log'><input id='log' type='checkbox' onclick='update_fft_display();'> Log</label>
+            <span class='info'><span>When checked, the image shows the natural log of the magnitude of the complex value plus 1 which can greatly help see all of the detail. Otherwise, no natural log or plus 1. The DC component is always clipped to the second-max.</span></span>
+            <label for='color'><input id='color' type='checkbox' onclick='update_fft_display();'> Color</label>
+            <span class='info'><span>The color is derived from the phase as follows (with positive real to the right and positive imaginary on the top):<br><img src="colors.png"></span></span><br><br>
+            <div style='text-align: center;'>You are hovering over:</div>
+            <table class=numerical>
+            <tr><td>Frequency:</td><td><span id='out-frequency'></span></td></tr>
+            <tr><td>Angle:</td><td><span id='out-angle'></span></td></tr>
+            </table>
+            <div style='text-align: center;'>And it has a value of:</div>
+            <table class=numerical>
+            <tr><td>Amplitude:</td><td><span id='out-amplitude'></span></td></tr>
+            <tr><td>Phase:</td><td><span id='out-phase'></span></td></tr>
+            </table>
+            <div style='text-align: center;'>It (approximately) looks like:</div>
+            <canvas id='fft-single-wave'></canvas>
+        </td><td style='text-align: center;'>
+            <h1>Limited Reconstruction</h1>
+            <canvas id='reconstruction'></canvas><br>
+            Using only the <input id='n-largest' type='number' min=1 max=32768 value=16 step=1 size=6 oninput='update_recon();'> largest values<br>
+            (that is only <span id='perc-largest'></span>% of the frequencies)<br><br>
+            Which has an FFT of:<br>
+            <canvas id='reconstruction-fft'></canvas>
+        </td></tr>
+    </table>
+</body>
+</html>

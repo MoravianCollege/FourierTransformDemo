@@ -1,0 +1,43 @@
+:root {
+    --size: 128px; /* size, before scaling */
+    --scale: 2;
+}
+
+body { font-size: 0.8em; }
+h1 { font-size: 1.5em; text-align: center; }
+td { vertical-align: top; text-align: right; }
+td td { vertical-align: default; width: auto; }
+table { margin: 0 auto; }
+img, canvas {
+    display: block;
+    text-align: center;
+    image-rendering: -moz-crisp-edges; image-rendering: crisp-edges; image-rendering: pixelated;
+    transform: scale(var(--scale));
+    margin: calc(var(--size) / var(--scale));
+    width: var(--size);
+    height: var(--size);
+}
+/*canvas { background-color: black; }*/
+.numerical td + td { min-width: 4em; text-align: right; }
+#image { filter: grayscale(); } /* happens to be defined as Rec 709! */
+input[type=number] { text-align: right; }
+#drop-target.active { border: 1px black dashed; padding: -1px; background-color: lightgray; }
+
+/* Tooltip */
+.info { position: relative; display: inline-block; }
+.info:before { content: 'ⓘ'; padding: 0 0.2em; font-size: 1.3em; color: blue; font-weight: bold; line-height: 0; }
+.info span {
+    visibility: hidden;
+    width: 256px;
+    background-color: #CCC;
+    border: 1px solid black;
+    text-align: center;
+    padding: 5px 0;
+    border-radius: 6px;
+    position: absolute;
+    z-index: 1;
+    right: 1.5em;
+}
+.info:hover span { visibility: visible; }
+.info span img[src="colors.png"] { width: 128px; height: 128px; }
+.info span img { image-rendering: auto; }
