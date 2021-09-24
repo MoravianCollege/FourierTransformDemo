@@ -2,7 +2,7 @@
 /* exported WIDTH, HEIGHT, SCALE */
 /* exported $, setup_canvas, set_canvas_data, get_image_bytes, download_image */
 /* exported sine2d, solid_gray, to_grayscale, from_grayscale, average_waves_and_fft, fft_to_image */
-/* exported compute_fft, to_f32, get_fft_info, compute_sorted_fft_indices, freq_hist */
+/* exported compute_fft, extract_fft, to_f32, get_fft_info, compute_sorted_fft_indices, freq_hist */
 "use strict";
 
 const WIDTH = 128, HEIGHT = 128, SCALE = 2;
@@ -273,26 +273,20 @@ function get_fft_info(fft, x, y) {
 	let mirrored = x < 0;
 	if (y < 0) { y += HEIGHT; } // change from [-h/2 to h/2) to [0 to h)
 	if (mirrored) { x = -x; y = (HEIGHT-y)%HEIGHT; } // on the mirror side
-	
+
 	let dc = Math.hypot(fft[0], fft[1])/(WIDTH*HEIGHT);
 	if (Math.abs(freq) < 0.005) { return [0, 0, dc, 0, solid_gray(dc)]; }
+	let max = 0;
+	for (let i = 2; i < W2*HEIGHT*2; i+=2) { max = Math.max(max, Math.hypot(fft[i], fft[i+1])); }
 
 	let pos = 2*(y*W2+x%W2); // position in the FFT array, 2x since it is real/imag interleaved
 	let real = fft[pos], imag = fft[pos+1];
 	if (mirrored) { imag = -imag; }
 
-	// TODO:
-	let sum = 0; // everything but the DC component
-	for (let i = 2; i < W2*HEIGHT*2; i+=2) { sum += Math.hypot(fft[i], fft[i+1]); }
-
-	let value = Math.hypot(real, imag); // / sum * dc; // in range [0, sqrt(width*height)*255]
+	let value = Math.hypot(real, imag) / max * dc; // in range [0, dc]
 	let phase = Math.atan2(imag, real); // in range [-pi, pi)
-
-	//let im = sine2d(value, freq, angle, phase, value);
-	let partial = extract_fft(fft, [pos]);    // Perform inverse FFT
-	let wave = from_grayscale(irfft2d(partial, HEIGHT, WIDTH));
-
-	return [freq, angle, value, phase, wave];
+	let im = sine2d(value, freq, angle, phase, value);
+	return [freq, angle, value, phase, im];
 }
 
 /**
