@@ -1,7 +1,8 @@
 /* global rfft2d, irfft2d */
+/* exported WIDTH, HEIGHT, SCALE */
 /* exported $, setup_canvas, set_canvas_data, get_image_bytes, download_image */
 /* exported sine2d, solid_gray, to_grayscale, from_grayscale, average_waves_and_fft, fft_to_image */
-/* exported compute_fft, to_f32, get_fft_info, compute_sorted_fft_indices */
+/* exported compute_fft, to_f32, get_fft_info, compute_sorted_fft_indices, freq_hist */
 "use strict";
 
 const WIDTH = 128, HEIGHT = 128, SCALE = 2;
@@ -38,7 +39,7 @@ function set_canvas_data(context, im) {
  * Get the RGBA bytes from an <img> or Image object. The image is forced to be
  * width-by-height.
  */
- function get_image_bytes(img) {
+function get_image_bytes(img) {
 	img.width = WIDTH;
 	img.height = HEIGHT;
 	let canvas = document.createElement('canvas');
@@ -54,7 +55,7 @@ function set_canvas_data(context, im) {
  * Download the image being shown in the given canvas as a PNG file.
  * The canvas can either be a <canvas> or the context.
  */
- function download_image(canvas) {
+function download_image(canvas) {
 	let a = document.createElement('a'); // a dummy <a> element
 	if ('canvas' in canvas) { canvas = canvas.canvas; }
 	a.href = canvas.toDataURL(); // creates a PNG image
@@ -282,14 +283,14 @@ function get_fft_info(fft, x, y) {
 
 	// TODO:
 	let sum = 0; // everything but the DC component
-	for (let i = 2; i < W2*HEIGHT*2; i+=2) { sum += Math.hypot(current_fft[i], current_fft[i+1]); }
+	for (let i = 2; i < W2*HEIGHT*2; i+=2) { sum += Math.hypot(fft[i], fft[i+1]); }
 
 	let value = Math.hypot(real, imag); // / sum * dc; // in range [0, sqrt(width*height)*255]
 	let phase = Math.atan2(imag, real); // in range [-pi, pi)
 
 	//let im = sine2d(value, freq, angle, phase, value);
 	let partial = extract_fft(fft, [pos]);    // Perform inverse FFT
-    let wave = from_grayscale(irfft2d(partial, HEIGHT, WIDTH));
+	let wave = from_grayscale(irfft2d(partial, HEIGHT, WIDTH));
 
 	return [freq, angle, value, phase, wave];
 }
@@ -351,7 +352,7 @@ function freq_hist(fft) {
 			let dist = Math.round(Math.hypot(x, y)/2);
 			let mag = Math.hypot(fft[pos], fft[pos+1]);
 			hist[dist] += mag;
-			if (x != 0) { hist[dist] += mag; }
+			if (x !== 0) { hist[dist] += mag; }
 		}
 	}
 	return hist;
